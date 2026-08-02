@@ -1,0 +1,64 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Fadak_Strong_Passw0rd!"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sql-data:/var/opt/mssql
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: PaymentService/PaymentService.Api/Dockerfile
+    environment:
+      ASPNETCORE_URLS: "http://+:8080"
+      Database__ConnectionString: "Server=sqlserver,1433;Database=FadakPayments;User Id=sa;Password=Fadak_Strong_Passw0rd!;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
+      Gateway__BaseUrl: "http://localhost:5002"
+      RabbitMq__HostName: "rabbitmq"
+    ports:
+      - "5001:8080"
+    depends_on:
+      - sqlserver
+      - rabbitmq
+
+  gateway-service:
+    build:
+      context: .
+      dockerfile: GatewayService/Dockerfile
+    environment:
+      ASPNETCORE_URLS: "http://+:8080"
+      PaymentService__BaseUrl: "http://payment-service:8080"
+    ports:
+      - "5002:8080"
+    depends_on:
+      - payment-service
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: NotificationService/Dockerfile
+    environment:
+      ASPNETCORE_URLS: "http://+:8080"
+      RabbitMq__HostName: "rabbitmq"
+    ports:
+      - "5003:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  sql-data:
