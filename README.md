@@ -1,54 +1,68 @@
 # Fadak Payment Gateway
 
-یک درگاه پرداخت آزمایشی مبتنی بر معماری Microservice شامل Payment Service، Gateway Service و Notification Service.
+درگاه پرداخت آزمایشی مبتنی بر سه Microservice مستقل و ساختار یکسان Clean/Layered Architecture.
 
-## معماری
+## ساختار Solution
 
-- **Payment Service — port 5001**: ایجاد Token، Verify، نگهداری تراکنش‌ها، API داخلی Update Status، انتشار Event و Job انقضا.
-- **Gateway Service — port 5002**: شبیه‌سازی پرداخت با احتمال موفقیت ۸۰٪، تولید RRN دوازده‌رقمی و اعلام نتیجه به Payment Service.
-- **Notification Service — port 5003**: مصرف `PaymentProcessedEvent` و `PaymentExpiredEvent` از RabbitMQ، ثبت Log و ارسال Callback به `RedirectUrl`.
-- **SQL Server**: دیتابیس مستقل Payment Service.
-- **RabbitMQ**: ارتباط ناهمزمان مبتنی بر Topic Exchange.
-- **Quartz.NET**: اجرای Job هر ۳۰ ثانیه و منقضی‌کردن Pendingهای قدیمی‌تر از ۲ دقیقه.
+هر سرویس از چهار پروژه تشکیل شده است:
 
-## تکنولوژی‌ها
+```text
+<Service>.Api             Controllers, Program, appsettings
+<Service>.Application     DTOs, Contracts, Options, Application services
+<Service>.Domain          Entities, Enums, Events, Abstractions
+<Service>.Infrastructure  EF Core, SQL Server, Repository, RabbitMQ, HttpClient, Jobs
+```
 
-.NET 9، ASP.NET Core Web API، Entity Framework Core، SQL Server، RabbitMQ، Quartz.NET و HttpClient.
+سرویس‌ها:
 
-## اجرای سریع با Docker
+- Payment Service روی پورت 5001
+- Gateway Service روی پورت 5002
+- Notification Service روی پورت 5003
 
-نیازمندی: Docker Desktop
+## دیتابیس‌های مستقل Code First
+
+- `FadakPayments` با جدول `Transactions`
+- `FadakGateway` با جدول `PaymentLogs`
+- `FadakNotifications` با جدول `NotificationLogs`
+
+هر سرویس DbContext و Repository مستقل دارد. در Startup، `EnsureCreatedAsync` مدل EF Core را به دیتابیس تبدیل می‌کند. Connection Stringها در `appsettings.json` و `appsettings.Development.json` هر Api قرار دارند.
+
+Connection String توسعه از SQL Server لوکال با Integrated Security استفاده می‌کند و برای هر سرویس `Initial Catalog` مستقل دارد.
+
+## اجرای محلی
+
+نیازمندی‌ها: .NET 9 SDK، SQL Server و RabbitMQ.
+
+```bash
+dotnet restore
+dotnet build fadak-task.sln
+
+dotnet run --project PaymentService/PaymentService.Api --urls http://localhost:5001
+dotnet run --project GatewayService/GatewayService.Api --urls http://localhost:5002
+dotnet run --project NotificationService/NotificationService.Api --urls http://localhost:5003
+```
+
+## اجرای Docker
 
 ```bash
 docker compose up --build
 ```
 
-آدرس‌ها:
+- RabbitMQ Management: `http://localhost:15672` (`guest` / `guest`)
+- Payment API: `http://localhost:5001`
+- Gateway API: `http://localhost:5002`
+- Notification Health: `http://localhost:5003/health`
 
-- Payment Service: `http://localhost:5001`
-- Gateway Service: `http://localhost:5002`
-- Notification Service health: `http://localhost:5003/health`
-- RabbitMQ Management: `http://localhost:15672` با نام کاربری و رمز `guest`
+## جریان پرداخت
 
-> در اجرای Docker مقدار `Gateway__BaseUrl` طوری تنظیم شده که URL برگشتی برای مرورگر کاربر `http://localhost:5002` باشد، در حالی که تماس داخلی Gateway با Payment Service از نام سرویس Docker استفاده می‌کند.
+1. `POST /api/payment/get-token`
+2. `GET /api/gateway/pay/{token}`
+3. Gateway نتیجه را با `POST /api/payment/update-status` ثبت می‌کند.
+4. Payment Service رویداد RabbitMQ منتشر می‌کند.
+5. Notification Service رویداد را Log کرده و Callback می‌فرستد.
+6. `POST /api/payment/verify` نتیجه نهایی را برمی‌گرداند.
 
-## اجرای محلی بدون Docker
-
-1. SQL Server و RabbitMQ را اجرا کنید.
-2. Connection String توسعه در `PaymentService/PaymentService.Api/appsettings.Development.json` قرار دارد و برای SQL Server لوکال با Integrated Security تنظیم شده است.
-3. پروژه‌ها را در سه Terminal اجرا کنید:
-
-```bash
-dotnet run --project PaymentService/PaymentService.Api --urls http://localhost:5001
-dotnet run --project GatewayService --urls http://localhost:5002
-dotnet run --project NotificationService --urls http://localhost:5003
-```
-
-Database در شروع برنامه با `EnsureCreated` ساخته می‌شود.
-
-## جریان تست
-
-### 1. دریافت Token
+## نمونه GetToken
 
 ```http
 POST http://localhost:5001/api/payment/get-token
@@ -63,51 +77,47 @@ Content-Type: application/json
 }
 ```
 
-### 2. شبیه‌سازی پرداخت
+جزئیات تطبیق با مستند و موارد باقی‌مانده در [REVIEW.md](REVIEW.md) آمده است.
 
-`gatewayUrl` پاسخ مرحله قبل را در مرورگر یا ابزار API فراخوانی کنید:
+## Solution structure
 
-```http
-GET http://localhost:5002/api/gateway/pay/{token}
+The solution follows the same Clean Architecture layout for all three services:
+
+```text
+src/
+  PaymentService/
+    PaymentService.Api
+    PaymentService.Application
+    PaymentService.Domain
+    PaymentService.Infrastructure
+  GatewayService/
+    GatewayService.Api
+    GatewayService.Application
+    GatewayService.Domain
+    GatewayService.Infrastructure
+  NotificationService/
+    NotificationService.Api
+    NotificationService.Application
+    NotificationService.Domain
+    NotificationService.Infrastructure
 ```
 
-### 3. Verify
+Dependencies follow this direction: `Api -> Infrastructure/Application`, `Infrastructure -> Application`, and `Application -> Domain`.
 
-```http
-POST http://localhost:5001/api/payment/verify
-Content-Type: application/json
+## Swagger
 
-{
-  "token": "{token}",
-  "appCode": "CLIENT-APP-01"
-}
-```
+After running the services, Swagger UI is available at:
 
-## Endpointها
+- Payment Service: `http://localhost:5001/swagger`
+- Gateway Service: `http://localhost:5002/swagger`
+- Notification Service: `http://localhost:5003/swagger`
 
-### Payment Service
+## Local SQL Server Code First
 
-- `POST /api/payment/get-token`
-- `POST /api/payment/verify`
-- `POST /api/payment/update-status` — Internal
-- `GET /api/payment/info/{token}` — Internal
+Each service has its own SQL Server database and initializes its schema from the EF Core model on startup:
 
-### Gateway Service
+- `FadakPayments`
+- `FadakGateway`
+- `FadakNotifications`
 
-- `GET /api/gateway/pay/{token}`
-
-## تصمیمات طراحی
-
-- Transition وضعیت با Conditional Update در دیتابیس انجام می‌شود تا درخواست‌های تکراری و Race Condition کنترل شوند.
-- RabbitMQ به‌صورت Lazy متصل می‌شود تا نبود موقت Broker مانع Startup سرویس پرداخت نشود.
-- Consumer با Manual Ack کار می‌کند؛ Callback ناموفق پس از Retry باعث Nack پیام می‌شود.
-- Notification Service دیتابیس ندارد و فقط Eventها را پردازش می‌کند.
-
-## بهبودهای پیشنهادی در زمان بیشتر
-
-- استفاده از EF Core Migration به‌جای `EnsureCreated`.
-- Outbox Pattern برای تضمین اتمیک‌بودن ذخیره تراکنش و انتشار Event.
-- Dead-letter exchange و سیاست Retry کامل در RabbitMQ.
-- Authentication برای APIهای داخلی و Rate Limiting.
-- Integration Test با Testcontainers و Unit Test برای Transitionها.
-- جایگزینی `RedirectUrl` با Callback URL مستقل برای جداسازی Redirect مرورگر از Server-to-server Callback.
+Development connection strings are stored in each API project's `appsettings.Development.json`.

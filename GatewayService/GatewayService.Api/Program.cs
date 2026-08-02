@@ -1,0 +1,11 @@
+using System.Text.Encodings.Web;
+using System.Text.Json.Serialization;
+using System.Text.Unicode;
+using GatewayService.Infrastructure;
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddControllers().AddJsonOptions(o => { o.JsonSerializerOptions.Encoder = JavaScriptEncoder.Create(UnicodeRanges.All); o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull; });
+builder.Services.AddEndpointsApiExplorer(); builder.Services.AddOpenApi();
+builder.Services.AddGatewayInfrastructure(builder.Configuration);
+var app = builder.Build();
+if (app.Environment.IsDevelopment()) app.MapOpenApi();
+app.MapControllers(); app.Run();
