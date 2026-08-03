@@ -5,11 +5,9 @@ using Microsoft.Extensions.Logging;
 
 namespace PaymentService.Infrastructure.Persistence;
 
-/// <summary>
-/// Creates the database schema on startup when it does not exist.
-/// </summary>
 public sealed class DatabaseInitializer : IHostedService
 {
+    private const int MaxAttempts = 10;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<DatabaseInitializer> _logger;
 
@@ -21,17 +19,26 @@ public sealed class DatabaseInitializer : IHostedService
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        try
+        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
         {
-            using var scope = _serviceProvider.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<PaymentDbContext>();
-            await db.Database.EnsureCreatedAsync(cancellationToken);
-            _logger.LogInformation("Database schema ensured.");
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<PaymentDbContext>();
+                await db.Database.MigrateAsync(cancellationToken);
+                _logger.LogInformation("Payment database migrations applied.");
+                return;
+            }
+            catch (Exception ex) when (attempt < MaxAttempts)
+            {
+                _logger.LogWarning(ex, "Payment database is not ready. Retry {Attempt}/{MaxAttempts}.", attempt, MaxAttempts);
+                await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to initialize the database.");
-        }
+
+        using var finalScope = _serviceProvider.CreateScope();
+        var finalDb = finalScope.ServiceProvider.GetRequiredService<PaymentDbContext>();
+        await finalDb.Database.MigrateAsync(cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

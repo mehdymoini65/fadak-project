@@ -86,30 +86,57 @@ public sealed class PaymentEventConsumer : BackgroundService
     {
         var queue = $"{_rabbit.ExchangeName}.{eventName}";
         var routingKey = $"{_rabbit.RoutingKey}.{eventName}";
-        _channel!.QueueDeclare(queue, durable: true, exclusive: false, autoDelete: false);
+        const string deadLetterExchange = "fadak.payments.dead-letter";
+        var deadLetterQueue = $"{queue}.dead-letter";
+        _channel!.ExchangeDeclare(deadLetterExchange, ExchangeType.Direct, durable: true, autoDelete: false);
+        _channel.QueueDeclare(deadLetterQueue, durable: true, exclusive: false, autoDelete: false);
+        _channel.QueueBind(deadLetterQueue, deadLetterExchange, eventName);
+        _channel.QueueDeclare(
+            queue,
+            durable: true,
+            exclusive: false,
+            autoDelete: false,
+            arguments: new Dictionary<string, object>
+            {
+                ["x-dead-letter-exchange"] = deadLetterExchange,
+                ["x-dead-letter-routing-key"] = eventName
+            });
         _channel.QueueBind(queue, _rabbit.ExchangeName, routingKey);
 
         var consumer = new AsyncEventingBasicConsumer(_channel);
         consumer.Received += async (_, args) =>
         {
+            PaymentEvent? paymentEvent = null;
+            var resolvedEventType = args.BasicProperties.Type ?? eventName;
             try
             {
-                var paymentEvent = JsonSerializer.Deserialize<PaymentEvent>(args.Body.Span, new JsonSerializerOptions
+                paymentEvent = JsonSerializer.Deserialize<PaymentEvent>(args.Body.Span, new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
                 }) ?? throw new JsonException("Payment event body was empty.");
 
                 _logger.LogInformation(
                     "Received {EventType}: Token={Token}, Status={Status}, Amount={Amount}, RRN={Rrn}.",
-                    args.BasicProperties.Type ?? eventName, paymentEvent.Token, paymentEvent.Status, paymentEvent.Amount, paymentEvent.Rrn);
+                    resolvedEventType, paymentEvent.Token, paymentEvent.Status, paymentEvent.Amount, paymentEvent.Rrn);
 
                 var attempts = await SendCallbackAsync(paymentEvent, stoppingToken);
-                await SaveLogAsync(paymentEvent, args.BasicProperties.Type ?? eventName, true, attempts, null, stoppingToken);
+                await SaveLogAsync(paymentEvent, resolvedEventType, true, attempts, null, stoppingToken);
                 _channel.BasicAck(args.DeliveryTag, false);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to process {EventType}; message will be dead-lettered/discarded.", eventName);
+                _logger.LogError(ex, "Failed to process {EventType}; message will be moved to the dead-letter queue.", eventName);
+                if (paymentEvent is not null)
+                {
+                    try
+                    {
+                        await SaveLogAsync(paymentEvent, resolvedEventType, false, Math.Max(1, _callback.RetryCount), ex.Message, stoppingToken);
+                    }
+                    catch (Exception logException)
+                    {
+                        _logger.LogError(logException, "Failed to persist unsuccessful notification log for token {Token}.", paymentEvent.Token);
+                    }
+                }
                 _channel.BasicNack(args.DeliveryTag, false, requeue: false);
             }
         };

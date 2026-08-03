@@ -93,6 +93,10 @@ public sealed class TransactionService : ITransactionService
             return EndpointResult<VerifyPaymentResponse>.Invalid(Messages.InvalidToken);
         }
 
+        // The specification requires AppCode to be persisted during Verify.
+        await _repository.UpdateAppCodeAsync(request.Token, request.AppCode, cancellationToken);
+        _logger.LogInformation("AppCode recorded for token {Token}.", request.Token);
+
         var cutoff = DateTime.UtcNow.AddMinutes(-_expirationOptions.TimeoutMinutes);
         var timeExpired = transaction.CreatedAt < cutoff;
 
@@ -113,21 +117,33 @@ public sealed class TransactionService : ITransactionService
             });
         }
 
-        if (!string.IsNullOrWhiteSpace(request.AppCode))
+        if (transaction.Status == PaymentStatus.Success)
         {
-            await _repository.UpdateAppCodeAsync(request.Token, request.AppCode, cancellationToken);
-            _logger.LogInformation("AppCode recorded for token {Token}.", request.Token);
+            return EndpointResult<VerifyPaymentResponse>.Success(new VerifyPaymentResponse
+            {
+                IsSuccess = true,
+                Status = nameof(PaymentStatus.Success),
+                Amount = transaction.Amount,
+                Rrn = transaction.Rrn,
+                ReservationNumber = transaction.ReservationNumber,
+                Message = Messages.PaymentVerified
+            });
         }
 
-        return EndpointResult<VerifyPaymentResponse>.Success(new VerifyPaymentResponse
+        if (transaction.Status == PaymentStatus.Failed)
         {
-            IsSuccess = transaction.Status == PaymentStatus.Success,
-            Status = transaction.Status.ToString(),
-            Amount = transaction.Amount,
-            Rrn = transaction.Rrn,
-            ReservationNumber = transaction.ReservationNumber,
-            Message = ResolveStatusMessage(transaction.Status)
-        });
+            return EndpointResult<VerifyPaymentResponse>.Success(new VerifyPaymentResponse
+            {
+                IsSuccess = false,
+                Status = nameof(PaymentStatus.Failed),
+                Amount = transaction.Amount,
+                ReservationNumber = transaction.ReservationNumber,
+                Message = Messages.PaymentFailed
+            });
+        }
+
+        // Pending is not part of the Verify response contract defined in the task document.
+        return EndpointResult<VerifyPaymentResponse>.Invalid(Messages.PaymentPending);
     }
 
     public async Task<EndpointResult<UpdatePaymentStatusResponse>> UpdateStatusAsync(UpdatePaymentStatusRequest request, CancellationToken cancellationToken)
@@ -236,17 +252,8 @@ public sealed class TransactionService : ITransactionService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to publish integration event {EventType}.", typeof(TEvent).Name);
+            throw;
         }
     }
 
-    private static string ResolveStatusMessage(PaymentStatus status)
-    {
-        return status switch
-        {
-            PaymentStatus.Success => "پرداخت با موفقیت تأیید شد",
-            PaymentStatus.Failed => "پرداخت ناموفق بود",
-            PaymentStatus.Expired => Messages.PaymentExpired,
-            _ => "پرداخت در انتظار تأیید است"
-        };
-    }
 }

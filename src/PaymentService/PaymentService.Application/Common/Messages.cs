@@ -5,6 +5,9 @@ public static class Messages
     public const string TokenCreated = "توکن با موفقیت ایجاد شد";
     public const string InvalidToken = "توکن نامعتبر است";
     public const string PaymentExpired = "زمان پرداخت منقضی شده است";
+    public const string PaymentVerified = "پرداخت با موفقیت تایید شد";
+    public const string PaymentFailed = "پرداخت ناموفق بود";
+    public const string PaymentPending = "پرداخت هنوز انجام نشده است";
     public const string StatusUpdated = "وضعیت با موفقیت به‌روزرسانی شد";
     public const string StatusAlreadyUpdated = "وضعیت قبلاً به‌روزرسانی شده است";
     public const string StatusUnchangeable = "وضعیت فعلی تراکنش اجازه تغییر را نمی‌دهد";

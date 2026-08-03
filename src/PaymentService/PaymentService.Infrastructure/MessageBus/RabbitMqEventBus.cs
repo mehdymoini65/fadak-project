@@ -46,15 +46,30 @@ public sealed class RabbitMqEventBus : IEventBus, IDisposable
         properties.ContentType = "application/json";
         properties.DeliveryMode = 2; // persistent
 
-        await Task.Run(() =>
+        const int maxAttempts = 3;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            _channel.BasicPublish(
-                exchange: _options.ExchangeName,
-                routingKey: routingKey,
-                mandatory: false,
-                basicProperties: properties,
-                body: body);
-        }, cancellationToken);
+            try
+            {
+                _channel!.ConfirmSelect();
+                _channel.BasicPublish(
+                    exchange: _options.ExchangeName,
+                    routingKey: routingKey,
+                    mandatory: true,
+                    basicProperties: properties,
+                    body: body);
+                _channel.WaitForConfirmsOrDie(TimeSpan.FromSeconds(5));
+                break;
+            }
+            catch (Exception ex) when (attempt < maxAttempts)
+            {
+                _logger.LogWarning(ex, "RabbitMQ publish attempt {Attempt}/{MaxAttempts} failed for {EventType}.", attempt, maxAttempts, eventName);
+                ResetConnection();
+                await Task.Delay(TimeSpan.FromSeconds(attempt), cancellationToken);
+                await EnsureConnectedAsync(cancellationToken);
+                EnsureQueue(eventName, routingKey);
+            }
+        }
 
         _logger.LogInformation(
             "Published {EventType} to {Exchange}/{RoutingKey}.",
@@ -119,10 +134,18 @@ public sealed class RabbitMqEventBus : IEventBus, IDisposable
         }
     }
 
-    public void Dispose()
+    private void ResetConnection()
     {
         _channel?.Dispose();
         _connection?.Dispose();
+        _channel = null;
+        _connection = null;
+        _declaredQueues.Clear();
+    }
+
+    public void Dispose()
+    {
+        ResetConnection();
         _sync.Dispose();
     }
 }

@@ -1,7 +1,37 @@
-using Microsoft.EntityFrameworkCore; using Microsoft.Extensions.DependencyInjection; using Microsoft.Extensions.Hosting; using Microsoft.Extensions.Logging;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
 namespace NotificationService.Infrastructure.Persistence;
+
 public sealed class DatabaseInitializer(IServiceProvider services, ILogger<DatabaseInitializer> logger) : IHostedService
 {
- public async Task StartAsync(CancellationToken ct) { try { using var s=services.CreateScope(); var db=s.ServiceProvider.GetRequiredService<NotificationDbContext>(); await db.Database.EnsureCreatedAsync(ct); } catch(Exception ex){ logger.LogError(ex,"Notification database initialization failed."); } }
- public Task StopAsync(CancellationToken ct)=>Task.CompletedTask;
+    private const int MaxAttempts = 10;
+
+    public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= MaxAttempts; attempt++)
+        {
+            try
+            {
+                using var scope = services.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<NotificationDbContext>();
+                await db.Database.MigrateAsync(cancellationToken);
+                logger.LogInformation("Notification database migrations applied.");
+                return;
+            }
+            catch (Exception ex) when (attempt < MaxAttempts)
+            {
+                logger.LogWarning(ex, "Notification database is not ready. Retry {Attempt}/{MaxAttempts}.", attempt, MaxAttempts);
+                await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+            }
+        }
+
+        using var finalScope = services.CreateScope();
+        var finalDb = finalScope.ServiceProvider.GetRequiredService<NotificationDbContext>();
+        await finalDb.Database.MigrateAsync(cancellationToken);
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

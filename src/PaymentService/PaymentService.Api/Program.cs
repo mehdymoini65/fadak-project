@@ -4,6 +4,7 @@ using System.Text.Unicode;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.OpenApi.Models;
 using PaymentService.Application.Common;
+using PaymentService.Application.Features.Payments.GetToken;
 using PaymentService.Infrastructure;
 using PaymentService.Infrastructure.Middleware;
 
@@ -40,6 +41,9 @@ builder.Services.AddSwaggerGen(options =>
         Description = "Payment token creation, verification and internal status update APIs."
     });
 });
+
+builder.Services.AddMediatR(configuration =>
+    configuration.RegisterServicesFromAssembly(typeof(GetTokenCommand).Assembly));
 
 builder.Services.AddPaymentInfrastructure(builder.Configuration);
 
