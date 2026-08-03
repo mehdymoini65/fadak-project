@@ -165,6 +165,7 @@ Content-Type: application/json
 - Integration Test کامل با Testcontainers
 - Authentication برای Internal APIها
 - Correlation ID و Distributed Tracing
+- Handle Idempotency and Race Condition
 - محدودسازی Callback URLها برای محیط Production
 
 ## تست
