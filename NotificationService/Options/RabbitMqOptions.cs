@@ -1,5 +1,6 @@
 namespace NotificationService.Options;
 
+
 public sealed class RabbitMqOptions
 {
     public const string SectionName = "RabbitMq";

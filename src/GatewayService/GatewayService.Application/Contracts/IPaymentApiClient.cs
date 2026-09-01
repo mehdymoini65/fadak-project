@@ -4,4 +4,5 @@ public interface IPaymentApiClient
 {
     Task<TransactionInfoResponse?> GetInfoAsync(string token, CancellationToken cancellationToken);
     Task<bool> UpdateStatusAsync(UpdatePaymentStatusRequest request, CancellationToken cancellationToken);
+
 }
